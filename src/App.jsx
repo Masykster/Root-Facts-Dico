@@ -86,7 +86,12 @@ function App() {
       // isValidDetection expects { isValid, confidence } compared to detectionConfidenceThreshold
       if (isValidDetection(pred)) {
         // Stop scanning, proceed to facts
-        handleToggleCamera(); // stop the loop
+        isRunningRef.current = false;
+        actions.setRunning(false);
+        camera.stopCamera();
+        if (detectionCleanupRef.current) {
+          cancelAnimationFrame(detectionCleanupRef.current);
+        }
 
         // Show scanning finished ui state
         actions.setAppState('result');
