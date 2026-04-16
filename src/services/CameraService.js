@@ -25,8 +25,9 @@ export class CameraService {
       throw new Error('Media Devices API tidak didukung pada browser ini.');
     }
 
-    // Request permission first
-    await navigator.mediaDevices.getUserMedia({ video: true });
+    // Request permission first, then immediately release the stream
+    const tempStream = await navigator.mediaDevices.getUserMedia({ video: true });
+    tempStream.getTracks().forEach((track) => track.stop());
 
     const allDevices = await navigator.mediaDevices.enumerateDevices();
     this.devices = allDevices.filter((device) => device.kind === 'videoinput');
@@ -46,13 +47,22 @@ export class CameraService {
 
     this.stopCamera();
 
+    const videoConstraints = {
+      width: { ideal: 640 },
+      height: { ideal: 480 },
+      frameRate: { ideal: this.config.fps }
+    };
+
+    // Only set facingMode on mobile devices; desktops often only have one camera
+    // and forcing 'environment' causes getUserMedia to fail silently
+    if (selectedCameraType === 'front') {
+      videoConstraints.facingMode = 'user';
+    } else if (selectedCameraType !== 'default') {
+      videoConstraints.facingMode = 'environment';
+    }
+
     const constraints = {
-      video: {
-        width: { ideal: 640 },
-        height: { ideal: 480 },
-        facingMode: selectedCameraType === 'front' ? 'user' : 'environment',
-        frameRate: { ideal: this.config.fps }
-      },
+      video: videoConstraints,
       audio: false
     };
 

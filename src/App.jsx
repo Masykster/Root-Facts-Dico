@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import Header from './components/Header';
 import CameraSection from './components/CameraSection';
 import InfoPanel from './components/InfoPanel';
@@ -12,6 +12,7 @@ function App() {
   const { state, actions } = useAppState();
   const detectionCleanupRef = useRef(null);
   const isRunningRef = useRef(false);
+  const servicesRef = useRef({ detector: null, camera: null, generator: null });
   const [currentTone, setCurrentTone] = useState('normal');
 
   // TODO [Basic] Inisialisasi layanan deteksi, kamera, dan generator fakta saat aplikasi dimuat
@@ -22,6 +23,8 @@ function App() {
         const camera = new CameraService();
         const generator = new RootFactsService();
 
+        // Keep a stable ref so closures always see the latest services
+        servicesRef.current = { detector, camera, generator };
         actions.setServices({ detector, camera, generator });
 
         let progressD = 0;
@@ -46,44 +49,38 @@ function App() {
 
         actions.setModelStatus('Model AI Siap');
       } catch (error) {
-        actions.setError(`Gagal menginisialisasi layanan: ${  error.message}`);
+        actions.setError(`Gagal menginisialisasi layanan: ${error.message}`);
         actions.setModelStatus('Error Memuat Model');
       }
     };
 
     initServices();
-  }, []);
 
-  // Sync ref with state
-  useEffect(() => {
-    isRunningRef.current = state.isRunning;
-  }, [state.isRunning]);
-
-  // TODO [Basic] Bersihkan sumber daya saat komponen ditinggalkan
-  useEffect(() => {
+    // Cleanup only on unmount
     return () => {
       if (detectionCleanupRef.current) {
         cancelAnimationFrame(detectionCleanupRef.current);
       }
-      if (state.services.camera) {
-        state.services.camera.stopCamera();
+      if (servicesRef.current.camera) {
+        servicesRef.current.camera.stopCamera();
       }
     };
-  }, [state.services.camera]);
+  }, []);
 
   // TODO [Basic] Fungsi untuk memulai loop deteksi
-  const startDetectionLoop = async () => {
-    const { detector, camera, generator } = state.services;
+  const startDetectionLoop = useCallback(async () => {
+    const { detector, camera, generator } = servicesRef.current;
 
-    if (!isRunningRef.current || !camera.isActive() || !detector.isLoaded()) {
+    if (!isRunningRef.current || !camera || !camera.isActive() || !detector || !detector.isLoaded()) {
       return;
     }
 
     try {
       const pred = await detector.predict(camera.video);
 
-      // pred returns { result: 'Vegetable Name', confidence: 0-100, isValid: true }
-      // isValidDetection expects { isValid, confidence } compared to detectionConfidenceThreshold
+      // Guard: user may have stopped scanning while predict() was running
+      if (!isRunningRef.current) return;
+
       if (isValidDetection(pred)) {
         // Stop scanning, proceed to facts
         isRunningRef.current = false;
@@ -91,17 +88,17 @@ function App() {
         camera.stopCamera();
         if (detectionCleanupRef.current) {
           cancelAnimationFrame(detectionCleanupRef.current);
+          detectionCleanupRef.current = null;
         }
 
-        // Show scanning finished ui state
+        // Show result
         actions.setAppState('result');
-        const mappedResult = {
+        actions.setDetectionResult({
           className: pred.result,
           score: pred.confidence / 100
-        };
-        actions.setDetectionResult(mappedResult);
+        });
 
-        // Gen fact
+        // Generate fun fact
         try {
           const funFact = await generator.generateFacts(pred.result);
           actions.setFunFactData(funFact);
@@ -112,30 +109,35 @@ function App() {
         return; // end loop
       }
     } catch (err) {
-      console.error(err);
+      console.error('Detection error:', err);
     }
 
-    // throttle based on camera fps
-    setTimeout(() => {
-      detectionCleanupRef.current = requestAnimationFrame(startDetectionLoop);
-    }, 1000 / camera.config.fps);
-  };
+    // Continue loop only if still running
+    if (isRunningRef.current) {
+      const delay = Math.max(1000 / (camera.config?.fps || 30), 33);
+      detectionCleanupRef.current = setTimeout(() => {
+        requestAnimationFrame(startDetectionLoop);
+      }, delay);
+    }
+  }, [actions]);
 
   // TODO [Basic] Fungsi untuk memulai dan menghentikan kamera
-  const handleToggleCamera = async () => {
-    const { camera } = state.services;
+  const handleToggleCamera = useCallback(async () => {
+    const { camera } = servicesRef.current;
 
-    if (state.isRunning) {
+    if (!camera) return;
+
+    if (isRunningRef.current) {
       // Stop
-      actions.setRunning(false);
       isRunningRef.current = false;
+      actions.setRunning(false);
       camera.stopCamera();
       if (detectionCleanupRef.current) {
         cancelAnimationFrame(detectionCleanupRef.current);
+        clearTimeout(detectionCleanupRef.current);
+        detectionCleanupRef.current = null;
       }
-      if (state.appState !== 'result') {
-        actions.setAppState('idle');
-      }
+      actions.setAppState('idle');
     } else {
       // Start
       try {
@@ -143,26 +145,28 @@ function App() {
         actions.resetResults();
 
         await camera.startCamera();
-        actions.setRunning(true);
         isRunningRef.current = true;
+        actions.setRunning(true);
         actions.setAppState('analyzing');
 
         // Small delay to let camera stabilize
         setTimeout(() => {
-          startDetectionLoop();
+          if (isRunningRef.current) {
+            startDetectionLoop();
+          }
         }, APP_CONFIG.analyzingDelay || 500);
 
       } catch (err) {
-        actions.setError(`Gagal memulai kamera: ${  err.message}`);
+        actions.setError(`Gagal memulai kamera: ${err.message}`);
       }
     }
-  };
+  }, [actions, startDetectionLoop]);
 
   // TODO [Advance] Fungsi untuk mengubah nada fakta yang dihasilkan
   const handleToneChange = (newTone) => {
     setCurrentTone(newTone);
-    if (state.services.generator) {
-      state.services.generator.setTone(newTone);
+    if (servicesRef.current.generator) {
+      servicesRef.current.generator.setTone(newTone);
     }
   };
 
