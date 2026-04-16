@@ -7,14 +7,15 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.ico', 'icons/*'],
+      devOptions: {
+        enabled: true
+      },
+      // Data di dalam objek manifest ini yang dibaca oleh DevTools
       manifest: {
-        name: 'Root Fact App',
-        short_name: 'RootFact',
-        description: 'Aplikasi asisten berbasis web untuk mendeteksi sayuran dan memberikan fun fact menarik.',
-        theme_color: '#4ade80',
-        background_color: '#ffffff',
-        display: 'standalone',
+        name: 'Root Facts Dico',
+        short_name: 'RootFacts',
+        description: 'Aplikasi Root Facts',
+        theme_color: '#ffffff',
         icons: [
           {
             src: '/icons/icon-192x192.png',
@@ -25,6 +26,22 @@ export default defineConfig({
             src: '/icons/icon-512x512.png',
             sizes: '512x512',
             type: 'image/png'
+          }
+        ],
+      screenshots: [
+          {
+            src: '/icons/icon-512x512.png',
+            sizes: '512x512',
+            type: 'image/png',
+            form_factor: 'wide',
+            label: 'RootFacts App'
+          },
+          {
+            src: '/icons/icon-512x512.png',
+            sizes: '512x512',
+            type: 'image/png',
+            form_factor: 'narrow',
+            label: 'RootFacts App Mobile'
           }
         ]
       },
